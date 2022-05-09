@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  simple schedule serverless application setup
+  
+Globals:
+  Api:
+    MinimumCompressionSize: 0
+    TracingEnabled: true
+  Function:
+    Tracing: Active
+    Timeout: 3
+    Runtime: nodejs14.x
+    Environment:
+      Variables:
+        ENV: Production
+        PGDBCLUSTERARN: !ImportValue "default-db-cluster-arn"
+        PGUSER: !ImportValue "default-db-admin-username"
+        PGHOST: !ImportValue "default-db-cluster-endpoint"
+        PGPASSWORD: !ImportValue "default-db-password"
+        PGDATABASE: !ImportValue "default-db-name"
+        PGPORT: 5432 
+        SECRET_ARN: !ImportValue "default-db-secret"
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+        JWT_SECRET: "somesecretpossiblyssl"
+        JWT_EXPIRES_IN: "30d"
+        INVOICE_STORAGE_BUCKET_NAME: !Ref InvoicesStorageBucketName
+
+Conditions:
+  isSamLocal: !Equals [!Ref "AWS::StackName", ""]
+  isMaster: !Equals [!Ref "AWS::StackName", "auth-service"]
+
+Parameters:
+  InvoicesStorageBucketName:
+    Type: String
+    default: "InvoicesStorageBucketName"
+
+Resources:
+  InvoiceServiceApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: auth-service-api
+      StageName: prod
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ./docs/api.yaml
+
+  CreateInvoiceFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: dist/
+      Handler: create-invoice-function.lambdaHandler
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !ImportValue "default-db-secret"
+        - Statement:
+          - Effect: Allow
+            Action: 'rds-data:ExecuteStatement'
+            Resource: !ImportValue "default-db-cluster-arn"
+        - Statement:
+          - Effect: Allow
+            Action:
+              - s3:*
+            Resource:
+              - !Sub
+                - 'arn:aws:s3:::${BucketName}/*'
+                - BucketName: !Ref InvoicesStorageBucketName
+
+  DefaultBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref InvoicesStorageBucketName  
+
+# ##########################################################################################################
+# # Function permissions grant an AWS service or another account permission to use a function                                                               #
+# #########################################################################################################
+  CreateInvoiceFunctionResourcePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: apigateway.amazonaws.com
+      FunctionName: !Ref CreateInvoiceFunction
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${InvoiceServiceApiGateway}/*'

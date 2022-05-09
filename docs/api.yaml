@@ -1,0 +1,45 @@
+openapi: 3.0.1
+
+info:
+  title: invoice-service
+  version: 1
+  x-amazon-apigateway-binary-media-types: ["application/csv", "text/csv"]
+paths:
+  /invoice:
+    post:
+      summary: invoice
+      description: create an invoice
+      tags:
+        - invoice
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        type: aws_proxy
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreatePDFFunction.Arn}/invocations
+        responses:
+          default:
+            statusCode: 201
+
+x-amazon-apigateway-request-validators:
+  all:
+    validateRequestBody: true
+    validateRequestParameters: true
+x-amazon-apigateway-gateway-responses:
+  BAD_REQUEST_BODY:
+    statusCode: 400
+    responseTemplates:
+      application/json: '{ "error": { "code": 400, "message": $context.error.messageString } }'
+
+components:
+  securitySchemes: 
+    DefaultAuthorizer:
+      type: apiKey
+      name: "Authorization"
+      in: header
+      x-amazon-apigateway-authtype: "CUSTOM"
+      x-amazon-apigateway-authorizer:
+        authorizerResultTtlInSeconds: 0
+        identitySource: "method.request.header.authorizationToken"
+        authorizerUri: 
+          Fn::ImportValue: "authorizerUri"
+        type: "request"
